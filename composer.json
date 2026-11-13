@@ -9,6 +9,9 @@
         "ext-json": "*",
         "composer-runtime-api": "^2.0"
     },
+    "suggest": {
+        "symfony/messenger": "To flush after each consumed message with Deadcode\\Reporter\\Symfony\\FlushAfterMessageSubscriber"
+    },
     "autoload": {
         "psr-4": {
             "Deadcode\\Reporter\\": "src/"

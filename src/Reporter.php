@@ -4,34 +4,71 @@ declare(strict_types=1);
 
 namespace Deadcode\Reporter;
 
+use Closure;
 use Throwable;
 
 final class Reporter
 {
-    private const WIRE_FORMAT_VERSION = 1;
+    public const SOURCE_CLI = 'cli';
+    public const SOURCE_WORKER = 'worker';
 
+    private const WIRE_FORMAT_VERSION = 1;
+    private const BACK_OFF_SECONDS = 60;
+
+    /** @var Closure(): int */
+    private readonly Closure $clock;
+
+    /** @var array<string, 1> project-relative paths the collector accepted on $sentDay */
+    private array $sent = [];
+    private string $sentDay = '';
+    private int $nextAttemptAt = 0;
     private bool $failureLogged = false;
 
+    /**
+     * @param (Closure(): int)|null $clock current Unix time, time() when null
+     */
     public function __construct(
         private readonly Config $config,
         private readonly Transport $transport,
+        ?Closure $clock = null,
     ) {
+        $this->clock = $clock ?? time(...);
     }
 
     /**
-     * Sends one batch with a hit for every loaded file under the project root.
-     * Never throws: a batch that cannot be sent is dropped.
+     * Sends one batch with a hit for every loaded file under the project root
+     * that the collector has not accepted from this reporter yet today (UTC).
+     * So a flush sends what was loaded since the previous one, the first flush
+     * of a day sends everything again, and files of a batch that could not be
+     * sent go out with a later flush. After a failed send, flushes do nothing
+     * for a minute. Never throws.
      *
      * @param list<string> $loadedFiles absolute paths, as returned by get_included_files()
+     * @param string       $source      kind of process, one of the SOURCE_ constants
      */
-    public function flush(array $loadedFiles): void
+    public function flush(array $loadedFiles, string $source = self::SOURCE_CLI): void
     {
         try {
+            $now = ($this->clock)();
+            if ($now < $this->nextAttemptAt) {
+                return;
+            }
+
+            $day = gmdate('Y-m-d', $now);
+            if ($day !== $this->sentDay) {
+                $this->sent = [];
+                $this->sentDay = $day;
+            }
+
             $prefix = $this->config->projectRoot . '/';
             $files = [];
             foreach ($loadedFiles as $file) {
-                if (str_starts_with($file, $prefix)) {
-                    $files[substr($file, strlen($prefix))] = 1;
+                if (!str_starts_with($file, $prefix)) {
+                    continue;
+                }
+                $path = substr($file, strlen($prefix));
+                if (!isset($this->sent[$path])) {
+                    $files[$path] = 1;
                 }
             }
 
@@ -39,15 +76,20 @@ final class Reporter
                 return;
             }
 
+            // Set before sending so that it stands when the transport throws.
+            $this->nextAttemptAt = $now + self::BACK_OFF_SECONDS;
             $this->transport->send([
                 'v' => self::WIRE_FORMAT_VERSION,
                 'app' => $this->config->app,
                 'host' => (string) gethostname(),
                 'sha' => $this->config->sha,
                 'env' => $this->config->env,
-                'day' => gmdate('Y-m-d'),
+                'source' => $source,
+                'day' => $day,
                 'files' => $files,
             ]);
+            $this->nextAttemptAt = 0;
+            $this->sent += $files;
         } catch (Throwable $failure) {
             $this->logOnce($failure);
         }
@@ -66,6 +108,6 @@ final class Reporter
             return;
         }
 
-        error_log('deadcode reporter: batch dropped: ' . preg_replace('/\s+/', ' ', $failure->getMessage()));
+        error_log('deadcode reporter: batch not sent: ' . preg_replace('/\s+/', ' ', $failure->getMessage()));
     }
 }
