@@ -8,11 +8,14 @@ use RuntimeException;
 
 final class CurlTransport implements Transport
 {
-    private const TIMEOUT_MS = 1000;
-
+    /**
+     * @param int $timeoutMs limit for connecting and for the whole request; the
+     *                       default is what an application can afford at shutdown
+     */
     public function __construct(
         private readonly string $collectorUrl,
         private readonly string $token,
+        private readonly int $timeoutMs = 1000,
     ) {
     }
 
@@ -31,8 +34,8 @@ final class CurlTransport implements Transport
             'Content-Type: application/json',
             'Expect:',
         ]);
-        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT_MS, self::TIMEOUT_MS);
-        curl_setopt($curl, CURLOPT_TIMEOUT_MS, self::TIMEOUT_MS);
+        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT_MS, $this->timeoutMs);
+        curl_setopt($curl, CURLOPT_TIMEOUT_MS, $this->timeoutMs);
         // Keeps curl from using SIGALRM, which belongs to the host application.
         curl_setopt($curl, CURLOPT_NOSIGNAL, true);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);

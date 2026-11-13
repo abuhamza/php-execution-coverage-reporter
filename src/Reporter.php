@@ -11,8 +11,8 @@ final class Reporter
 {
     public const SOURCE_CLI = 'cli';
     public const SOURCE_WORKER = 'worker';
+    public const SOURCE_FPM = 'fpm';
 
-    private const WIRE_FORMAT_VERSION = 1;
     private const BACK_OFF_SECONDS = 60;
 
     /** @var Closure(): int */
@@ -78,16 +78,7 @@ final class Reporter
 
             // Set before sending so that it stands when the transport throws.
             $this->nextAttemptAt = $now + self::BACK_OFF_SECONDS;
-            $this->transport->send([
-                'v' => self::WIRE_FORMAT_VERSION,
-                'app' => $this->config->app,
-                'host' => (string) gethostname(),
-                'sha' => $this->config->sha,
-                'env' => $this->config->env,
-                'source' => $source,
-                'day' => $day,
-                'files' => $files,
-            ]);
+            $this->transport->send(Batch::of($this->config, $source, $now, $files));
             $this->nextAttemptAt = 0;
             $this->sent += $files;
         } catch (Throwable $failure) {
