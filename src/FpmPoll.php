@@ -42,6 +42,7 @@ final class FpmPoll
      */
     public function run(mixed $status): string
     {
+        $state = false;
         try {
             if (!is_array($status) || ($status['opcache_enabled'] ?? false) !== true || !is_array($status['scripts'] ?? null)) {
                 return 'opcache is not available';
@@ -117,6 +118,13 @@ final class FpmPoll
             error_log('deadcode reporter: fpm poll: ' . $outcome);
 
             return $outcome;
+        } finally {
+            // Released here rather than when the handle goes out of scope: a
+            // caught exception can keep the frame, and with it the lock, alive.
+            if (is_resource($state)) {
+                flock($state, LOCK_UN);
+                fclose($state);
+            }
         }
     }
 
