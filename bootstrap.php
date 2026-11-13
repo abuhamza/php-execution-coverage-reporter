@@ -13,11 +13,15 @@ if (PHP_SAPI === 'cli') {
     // Configuration is read at shutdown so that variables loaded by the
     // application after the autoloader (dotenv files) are seen.
     register_shutdown_function(static function (): void {
-        $config = Config::fromEnv($_SERVER + $_ENV + getenv(), InstalledVersions::getRootPackage()['install_path']);
-        if ($config === null) {
-            return;
-        }
+        try {
+            $config = Config::fromEnv($_SERVER + $_ENV + getenv(), InstalledVersions::getRootPackage()['install_path']);
+            if ($config === null) {
+                return;
+            }
 
-        (new Reporter($config, new CurlTransport($config->url, $config->token)))->flush(get_included_files());
+            (new Reporter($config, new CurlTransport($config->url, $config->token)))->flush(get_included_files());
+        } catch (Throwable) {
+            // Nothing in the reporter may reach the host application.
+        }
     });
 }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Deadcode\Reporter;
 
+use RuntimeException;
+
 final class CurlTransport implements Transport
 {
     private const TIMEOUT_MS = 1000;
@@ -16,19 +18,32 @@ final class CurlTransport implements Transport
 
     public function send(array $batch): void
     {
-        $body = json_encode($batch);
         $curl = curl_init(rtrim($this->collectorUrl, '/') . '/ingest');
-        if ($body === false || $curl === false) {
-            return;
+        if ($curl === false) {
+            throw new RuntimeException('could not initialise curl');
         }
 
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $body);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($batch, JSON_THROW_ON_ERROR));
+        // The empty Expect header stops curl from holding back a large body (over
+        // 1 MB, or 1 KB with older curl) for a second waiting for "100 Continue".
         curl_setopt($curl, CURLOPT_HTTPHEADER, [
             'Authorization: Bearer ' . $this->token,
             'Content-Type: application/json',
+            'Expect:',
         ]);
+        curl_setopt($curl, CURLOPT_CONNECTTIMEOUT_MS, self::TIMEOUT_MS);
         curl_setopt($curl, CURLOPT_TIMEOUT_MS, self::TIMEOUT_MS);
+        // Keeps curl from using SIGALRM, which belongs to the host application.
+        curl_setopt($curl, CURLOPT_NOSIGNAL, true);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_exec($curl);
+
+        if (curl_exec($curl) === false) {
+            throw new RuntimeException(curl_error($curl));
+        }
+
+        $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        if ($status < 200 || $status >= 300) {
+            throw new RuntimeException('collector answered HTTP ' . $status);
+        }
     }
 }
